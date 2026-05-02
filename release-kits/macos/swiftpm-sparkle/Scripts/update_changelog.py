@@ -6,6 +6,7 @@ import argparse
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -122,6 +123,13 @@ TOOL_LOG_PATTERN = re.compile(
 
 
 @dataclass
+class CommitMessage:
+    subject: str
+    body: str
+    lower_subject: str
+
+
+@dataclass
 class CommitEntry:
     category: str
     scope: str | None
@@ -196,10 +204,10 @@ def normalize_description(description: str) -> str:
     return cleaned.rstrip("。.;；")
 
 
-def collect_commits(from_ref: str, to_ref: str) -> list[tuple[str, str, str]]:
+def collect_commits(from_ref: str, to_ref: str) -> list[CommitMessage]:
     revision_range = build_revision_range(from_ref, to_ref)
     raw_log = run_git("log", "--reverse", "--format=%s%x1f%b%x1e", revision_range)
-    commits: list[tuple[str, str, str]] = []
+    commits: list[CommitMessage] = []
 
     for record in raw_log.strip("\x1e").split("\x1e"):
         if not record.strip():
@@ -210,7 +218,7 @@ def collect_commits(from_ref: str, to_ref: str) -> list[tuple[str, str, str]]:
         lower_subject = normalized_subject.lower()
         if any(lower_subject.startswith(prefix) for prefix in IGNORED_SUBJECT_PREFIXES):
             continue
-        commits.append((normalized_subject, normalized_body, lower_subject))
+        commits.append(CommitMessage(subject=normalized_subject, body=normalized_body, lower_subject=lower_subject))
 
     return commits
 
@@ -356,15 +364,42 @@ def render_grouped_changes(entries: list[CommitEntry], preset: dict[str, str]) -
     return "\n".join(lines)
 
 
-def build_summary_prompt(project_name: str, version: str, entries: list[CommitEntry], preset: dict[str, str]) -> str:
-    grouped_changes = render_grouped_changes(entries, preset)
-    stats = render_stats(entries, preset)
-    return (
-        preset["prompt_intro"].format(project_name=project_name, version=version)
-        + "\n"
-        + preset["prompt_requirements"]
-        + f"\n\n{stats}\n\n{grouped_changes}\n"
-    )
+def render_commit_messages(commits: list[CommitMessage], preset: dict[str, str]) -> str:
+    if not commits:
+        return preset["fallback_release"].format(version="")
+
+    lines: list[str] = []
+    for index, commit in enumerate(commits, start=1):
+        lines.append(f"{index}. {commit.subject}")
+        if commit.body:
+            body = re.sub(r"\n{3,}", "\n\n", commit.body.strip())
+            lines.extend(f"   {line}" if line else "" for line in body.splitlines())
+
+    return "\n".join(lines)
+
+
+def build_summary_prompt(project_name: str, version: str, commits: list[CommitMessage], preset: dict[str, str], language: str) -> str:
+    commit_messages = render_commit_messages(commits, preset)
+    if language == "zh-CN":
+        return f"""{preset["prompt_intro"].format(project_name=project_name, version=version)}
+
+{preset["prompt_requirements"]}
+
+请直接分析下面的 Git commit message 来归纳摘要，不要根据 Conventional Commit 的 type、scope 或数量机械拼接。
+
+Commit messages:
+{commit_messages}
+"""
+
+    return f"""{preset["prompt_intro"].format(project_name=project_name, version=version)}
+
+{preset["prompt_requirements"]}
+
+Analyze the Git commit messages below directly. Do not mechanically compose the summary from Conventional Commit types, scopes, or counts.
+
+Commit messages:
+{commit_messages}
+"""
 
 
 def _sanitize_summary_output(text: str) -> str:
@@ -373,18 +408,21 @@ def _sanitize_summary_output(text: str) -> str:
     return cleaned.strip()
 
 
-def build_summary_with_optional_command(project_name: str, version: str, entries: list[CommitEntry], preset: dict[str, str]) -> str:
-    command_template = os.getenv("CHANGELOG_SUMMARY_COMMAND", "").strip()
-    if not command_template:
-        return build_summary(entries, preset)
+def _strip_markdown_fence(text: str) -> str:
+    match = re.match(r"^```(?:markdown|md)?\s*\n(?P<body>.*)\n```\s*$", text.strip(), re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group("body").strip()
+    return re.sub(r"^```(?:markdown|md)?\s*", "", re.sub(r"\s*```$", "", text.strip(), flags=re.IGNORECASE), flags=re.IGNORECASE).strip()
 
-    prompt = build_summary_prompt(project_name, version, entries, preset)
+
+def run_prompt_command(command_template: str, prompt: str, warning_label: str) -> str | None:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as prompt_file:
         prompt_file.write(prompt)
         prompt_path = prompt_file.name
 
+    completed: subprocess.CompletedProcess[str] | None = None
     try:
-        command = command_template.replace("{prompt_file}", prompt_path)
+        command = command_template.replace("{prompt_file}", shlex.quote(prompt_path))
         completed = subprocess.run(
             ["/bin/sh", "-lc", command],
             capture_output=True,
@@ -395,18 +433,26 @@ def build_summary_with_optional_command(project_name: str, version: str, entries
 
     if completed.returncode != 0:
         print(
-            f"Warning: summary command failed, falling back to local summary: {completed.stderr.strip()}",
+            f"Warning: {warning_label} failed, falling back to local changelog: {completed.stderr.strip()}",
             file=sys.stderr,
         )
+        return None
+
+    output = _strip_markdown_fence(_sanitize_summary_output(completed.stdout))
+    return output or None
+
+
+def build_summary_with_optional_command(project_name: str, version: str, commits: list[CommitMessage], entries: list[CommitEntry], preset: dict[str, str], language: str) -> str:
+    command_template = os.getenv("CHANGELOG_SUMMARY_COMMAND", "").strip()
+    if not command_template:
         return build_summary(entries, preset)
 
-    summary = _sanitize_summary_output(completed.stdout)
-    summary = re.sub(r"^```(?:markdown|md)?\s*", "", summary)
-    summary = re.sub(r"\s*```$", "", summary).strip()
-    if not summary:
+    prompt = build_summary_prompt(project_name, version, commits, preset, language)
+    output = run_prompt_command(command_template, prompt, "summary command")
+    if output is None:
         return build_summary(entries, preset)
 
-    summary = summary.lstrip("> ").strip()
+    summary = output.lstrip("> ").strip()
     return f"> {summary}"
 
 
@@ -448,14 +494,14 @@ def render_by_category(entries: list[CommitEntry], preset: dict[str, str]) -> st
     return "\n".join(lines)
 
 
-def render_section(project_name: str, version: str, entries: list[CommitEntry], preset: dict[str, str]) -> str:
+def render_local_section(project_name: str, version: str, commits: list[CommitMessage], entries: list[CommitEntry], preset: dict[str, str], language: str) -> str:
     if not entries:
         entries = [CommitEntry(category="improvement", scope=None, description=preset["fallback_release"].format(version=version))]
 
     section_parts = [
         f"## v{version}",
         "",
-        build_summary_with_optional_command(project_name, version, entries, preset),
+        build_summary_with_optional_command(project_name, version, commits, entries, preset, language),
         "",
         render_by_category(entries, preset),
     ]
@@ -482,10 +528,10 @@ def main() -> int:
 
     commits = collect_commits(args.from_ref, args.to_ref)
     entries = [
-        classify_commit(subject, body, lower_subject, scope_aliases, preset)
-        for subject, body, lower_subject in commits
+        classify_commit(commit.subject, commit.body, commit.lower_subject, scope_aliases, preset)
+        for commit in commits
     ]
-    section = render_section(project_name, args.version, entries, preset)
+    section = render_local_section(project_name, args.version, commits, entries, preset, args.language)
 
     if args.mode == "section":
         sys.stdout.write(section)

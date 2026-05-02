@@ -215,26 +215,44 @@ jobs:
           echo "remote_tag_exists=${remote_tag_exists}" >> "$GITHUB_OUTPUT"
 
       - name: Set up changelog summary command
-        if: github.event_name != 'push' && inputs.changelog_enabled && inputs.changelog_summary_setup_command != '' && steps.version.outputs.remote_tag_exists != 'true'
+        if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
         shell: bash
         env:
+          CHANGELOG_SUMMARY_SETUP_COMMAND: ${{ inputs.changelog_summary_setup_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          NPM_CONFIG_IGNORE_SCRIPTS: "false"
         run: |
           set -euo pipefail
-          ${{ inputs.changelog_summary_setup_command }}
+
+          if [[ -n "${CHANGELOG_SUMMARY_SETUP_COMMAND:-}" ]]; then
+            eval "$CHANGELOG_SUMMARY_SETUP_COMMAND"
+          elif [[ -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
+            npm install -g @github/copilot
+          else
+            echo "No changelog summary token or setup command configured; local fallback will be used."
+          fi
 
       - name: Update changelog from commits
         if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
         shell: bash
         env:
-          CHANGELOG_SUMMARY_COMMAND: ${{ inputs.changelog_summary_command }}
+          CHANGELOG_SUMMARY_COMMAND_INPUT: ${{ inputs.changelog_summary_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          NPM_CONFIG_IGNORE_SCRIPTS: "false"
         run: |
           set -euo pipefail
 
           cd app
+
+          changelog_summary_command="${CHANGELOG_SUMMARY_COMMAND_INPUT:-}"
+          if [[ -z "$changelog_summary_command" && -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
+            changelog_summary_command='copilot -s --no-ask-user -p "$(cat {prompt_file})"'
+          fi
+
+          export CHANGELOG_SUMMARY_COMMAND="$changelog_summary_command"
+
           python3 "../release-kit/${{ inputs.release_kit_path }}/${{ inputs.changelog_script }}" \
             --version "${{ steps.version.outputs.version }}" \
             --from-ref "${{ steps.version.outputs.previous_tag }}" \
