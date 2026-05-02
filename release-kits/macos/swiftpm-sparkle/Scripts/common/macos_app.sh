@@ -168,6 +168,7 @@ macos_app_create_bundle() {
   local version="${APP_VERSION:-$(macos_app_plist_read CFBundleShortVersionString)}"
   local build_number="${BUILD_NUMBER:-$(macos_app_plist_read CFBundleVersion)}"
   local min_macos="${APP_MIN_MACOS:-$(macos_app_plist_read LSMinimumSystemVersion)}"
+  local bundle_name="${APP_BUNDLE_NAME:-$APP_DISPLAY_NAME}"
 
   version="${version:-1.0.0}"
   build_number="${build_number:-$version}"
@@ -201,7 +202,7 @@ macos_app_create_bundle() {
   macos_app_copy_frameworks "$bin_path" "$app_bundle"
   macos_app_configure_rpaths "${app_bundle}/Contents/MacOS/${APP_TARGET_NAME}"
 
-  macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleName string "$APP_TARGET_NAME"
+  macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleName string "$bundle_name"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleDisplayName string "$APP_DISPLAY_NAME"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleIdentifier string "$APP_BUNDLE_ID"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleExecutable string "$APP_TARGET_NAME"

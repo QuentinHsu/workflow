@@ -37,6 +37,8 @@ jobs:
       app_bundle_id: com.skillshub.app
       app_min_macos: "15.0"
       app_icon_path: Assets/AppIcon.icns
+      macos_runner: macos-15
+      xcode_version: latest-stable
       release_kit_repository: QuentinHsu/workflow
       release_kit_ref: main
       release_kit_path: release-kits/macos/swiftpm-sparkle
@@ -62,6 +64,21 @@ Optional changelog inputs:
 - `changelog_summary_setup_command`: optional shell setup for an external summary command.
 - `changelog_summary_command`: optional command template. Use `{prompt_file}` where the generated prompt path should be inserted.
 - `changelog_summary_token`: optional secret exposed as both `CHANGELOG_SUMMARY_TOKEN` and `COPILOT_GITHUB_TOKEN`.
+
+Optional toolchain inputs:
+
+- `macos_runner`: GitHub-hosted macOS runner label for the build job. Defaults to `macos-15`.
+- `xcode_version`: Xcode version passed to `maxim-lobanov/setup-xcode`. Defaults to `latest-stable`.
+
+Use both when a package requires a newer Swift tools version than the default runner provides, for example by selecting a runner image that includes the needed Xcode and then setting `xcode_version` to that installed version.
+
+For Swift 6.3, use an image that includes Xcode 26.4.1:
+
+```yaml
+with:
+  macos_runner: macos-26
+  xcode_version: "26.4.1"
+```
 
 For GitHub Copilot CLI summaries, create a fine-grained personal access token from [GitHub personal access tokens](https://github.com/settings/personal-access-tokens/new), add the `Copilot Requests` account permission, then save it in the caller repository as the `COPILOT_GITHUB_TOKEN` Actions secret. Pass it through with:
 

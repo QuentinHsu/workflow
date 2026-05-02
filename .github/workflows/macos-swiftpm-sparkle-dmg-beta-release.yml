@@ -27,6 +27,14 @@ on:
         required: false
         type: string
         default: ""
+      macos_runner:
+        required: false
+        type: string
+        default: macos-15
+      xcode_version:
+        required: false
+        type: string
+        default: latest-stable
       build_script:
         required: false
         type: string
@@ -121,7 +129,7 @@ jobs:
       fail-fast: false
       matrix:
         target_arch: ${{ fromJSON(inputs.architectures) }}
-    runs-on: macos-15
+    runs-on: ${{ inputs.macos_runner }}
     permissions:
       contents: read
     steps:
@@ -141,7 +149,7 @@ jobs:
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: ${{ inputs.xcode_version }}
 
       - name: Import code signing certificate
         shell: bash
