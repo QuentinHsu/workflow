@@ -58,6 +58,13 @@ Optional changelog inputs:
 - `changelog_summary_command`: optional command template. Use `{prompt_file}` where the generated prompt path should be inserted.
 - `changelog_summary_token`: optional secret exposed as both `CHANGELOG_SUMMARY_TOKEN` and `COPILOT_GITHUB_TOKEN`.
 
+For GitHub Copilot CLI summaries, create a fine-grained personal access token from [GitHub personal access tokens](https://github.com/settings/personal-access-tokens/new), add the `Copilot Requests` account permission, then save it in the caller repository as the `COPILOT_GITHUB_TOKEN` Actions secret. Pass it through with:
+
+```yaml
+secrets:
+  changelog_summary_token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+```
+
 Required app-side files:
 
 - `Package.swift`
