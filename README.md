@@ -46,6 +46,11 @@ jobs:
       architectures: '["arm64","x86_64"]'
     secrets:
       sparkle_private_ed_key: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+      code_sign_certificate_base64: ${{ secrets.MACOS_CODE_SIGN_CERTIFICATE_BASE64 }}
+      code_sign_certificate_password: ${{ secrets.MACOS_CODE_SIGN_CERTIFICATE_PASSWORD }}
+      notarization_key_base64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
+      notarization_key_id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+      notarization_issuer_id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
 ```
 
 The stable release workflow generates and commits `CHANGELOG.md` before creating a manual release tag. It groups Conventional Commit entries into features, improvements, and fixes, then uses the matching changelog section as the GitHub Release body. Set `changelog_enabled: false` to keep release notes generated directly from git history.
@@ -75,3 +80,13 @@ Required app repository settings:
 
 - Variable: `SPARKLE_PUBLIC_ED_KEY`
 - Secret: `SPARKLE_PRIVATE_ED_KEY`
+
+Recommended signing and notarization settings for public releases:
+
+- Secret: `MACOS_CODE_SIGN_CERTIFICATE_BASE64`
+- Secret: `MACOS_CODE_SIGN_CERTIFICATE_PASSWORD`
+- Secret: `APPLE_NOTARIZATION_KEY_BASE64`
+- Secret: `APPLE_NOTARIZATION_KEY_ID`
+- Secret: `APPLE_NOTARIZATION_ISSUER_ID`
+
+`MACOS_CODE_SIGN_CERTIFICATE_BASE64` should contain a base64-encoded `.p12` with a Developer ID Application certificate and private key. `APPLE_NOTARIZATION_KEY_BASE64` should contain a base64-encoded App Store Connect API key `.p8`. If signing secrets are omitted, the workflow falls back to ad-hoc signing, which is useful for internal testing but will be rejected by Gatekeeper for normal downloaded releases.

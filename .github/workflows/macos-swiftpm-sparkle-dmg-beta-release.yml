@@ -55,8 +55,22 @@ on:
         required: false
         type: string
         default: '["arm64","x86_64"]'
+      code_sign_identity:
+        required: false
+        type: string
+        default: ""
     secrets:
       sparkle_private_ed_key:
+        required: false
+      code_sign_certificate_base64:
+        required: false
+      code_sign_certificate_password:
+        required: false
+      notarization_key_base64:
+        required: false
+      notarization_key_id:
+        required: false
+      notarization_issuer_id:
         required: false
 
 jobs:
@@ -129,6 +143,51 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Import code signing certificate
+        shell: bash
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.code_sign_certificate_base64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.code_sign_certificate_password }}
+          INPUT_CODE_SIGN_IDENTITY: ${{ inputs.code_sign_identity }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CERTIFICATE_BASE64:-}" ]]; then
+            echo "code_sign_certificate_base64 is not set; release will use ad-hoc signing."
+            exit 0
+          fi
+
+          if [[ -z "${CERTIFICATE_PASSWORD:-}" ]]; then
+            echo "code_sign_certificate_password is required when code_sign_certificate_base64 is set." >&2
+            exit 1
+          fi
+
+          keychain_password="$(uuidgen)"
+          keychain_path="${RUNNER_TEMP}/app-signing.keychain-db"
+          certificate_path="${RUNNER_TEMP}/code-signing.p12"
+
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
+
+          identity="$INPUT_CODE_SIGN_IDENTITY"
+          if [[ -z "$identity" ]]; then
+            identity="$(security find-identity -v -p codesigning "$keychain_path" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1 || true)"
+          fi
+
+          if [[ -z "$identity" ]]; then
+            echo "Could not find a Developer ID Application signing identity in the imported certificate." >&2
+            security find-identity -v -p codesigning "$keychain_path" >&2 || true
+            exit 1
+          fi
+
+          echo "CODE_SIGN_IDENTITY=${identity}" >> "$GITHUB_ENV"
+          echo "Using code signing identity: ${identity}"
+
       - name: Build DMG
         shell: bash
         env:
@@ -151,6 +210,40 @@ jobs:
             exit 1
           fi
           release-kit/${{ inputs.release_kit_path }}/${{ inputs.build_script }} dmg
+
+      - name: Notarize DMG
+        shell: bash
+        env:
+          NOTARIZATION_KEY_BASE64: ${{ secrets.notarization_key_base64 }}
+          NOTARIZATION_KEY_ID: ${{ secrets.notarization_key_id }}
+          NOTARIZATION_ISSUER_ID: ${{ secrets.notarization_issuer_id }}
+          DMG_NAME: ${{ inputs.app_target_name }}-${{ needs.prepare-beta.outputs.version }}-${{ matrix.target_arch }}.dmg
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${NOTARIZATION_KEY_BASE64:-}" ]]; then
+            echo "notarization_key_base64 is not set; skipping notarization."
+            exit 0
+          fi
+
+          if [[ -z "${CODE_SIGN_IDENTITY:-}" || -z "${NOTARIZATION_KEY_ID:-}" || -z "${NOTARIZATION_ISSUER_ID:-}" ]]; then
+            echo "CODE_SIGN_IDENTITY, notarization_key_id, and notarization_issuer_id are required for notarization." >&2
+            exit 1
+          fi
+
+          key_path="${RUNNER_TEMP}/AuthKey_${NOTARIZATION_KEY_ID}.p8"
+          printf '%s' "$NOTARIZATION_KEY_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+
+          dmg_path="dist/${DMG_NAME}"
+          xcrun notarytool submit "$dmg_path" \
+            --key "$key_path" \
+            --key-id "$NOTARIZATION_KEY_ID" \
+            --issuer "$NOTARIZATION_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+          (cd dist && shasum -a 256 "$DMG_NAME" > "${DMG_NAME}.sha256")
 
       - name: Generate beta Sparkle appcast
         shell: bash

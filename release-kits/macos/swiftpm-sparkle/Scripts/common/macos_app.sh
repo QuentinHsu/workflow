@@ -78,15 +78,33 @@ macos_app_copy_frameworks() {
     done
 }
 
+macos_app_configure_rpaths() {
+  local executable="$1"
+
+  if ! command -v install_name_tool >/dev/null 2>&1 || ! command -v otool >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! otool -L "$executable" | grep -q "@rpath/"; then
+    return 0
+  fi
+
+  if otool -l "$executable" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
+    return 0
+  fi
+
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$executable"
+}
+
 macos_app_sign_bundle() {
   local app_bundle="$1"
   local identity="${CODE_SIGN_IDENTITY:--}"
 
-  local sign_args=(--force --options runtime)
+  local sign_args=(--force)
   if [[ "$identity" != "-" ]]; then
-    sign_args+=(--timestamp)
+    sign_args+=(--options runtime --timestamp)
   else
-    echo "CODE_SIGN_IDENTITY is not set; ad-hoc signing ${app_bundle}."
+    echo "CODE_SIGN_IDENTITY is not set; ad-hoc signing ${app_bundle} without hardened runtime."
   fi
   sign_args+=(--sign "$identity")
   if [[ -n "${CODE_SIGN_ENTITLEMENTS:-}" ]]; then
@@ -181,6 +199,7 @@ macos_app_create_bundle() {
   fi
 
   macos_app_copy_frameworks "$bin_path" "$app_bundle"
+  macos_app_configure_rpaths "${app_bundle}/Contents/MacOS/${APP_TARGET_NAME}"
 
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleName string "$APP_TARGET_NAME"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleDisplayName string "$APP_DISPLAY_NAME"
@@ -243,7 +262,12 @@ macos_app_create_dmg() {
     -quiet \
     "$dmg_path"
 
-  shasum -a 256 "$dmg_path" > "${dmg_path}.sha256"
+  if [[ -n "${CODE_SIGN_IDENTITY:-}" && "${CODE_SIGN_IDENTITY}" != "-" ]]; then
+    codesign --force --timestamp --sign "$CODE_SIGN_IDENTITY" "$dmg_path"
+    codesign --verify --verbose=2 "$dmg_path"
+  fi
+
+  (cd "$(dirname "$dmg_path")" && shasum -a 256 "$(basename "$dmg_path")" > "$(basename "$dmg_path").sha256")
   rm -rf "$staging"
 
   echo "$dmg_path"
