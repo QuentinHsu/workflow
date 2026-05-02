@@ -11,7 +11,7 @@ from pathlib import Path
 
 def run_sign_update(tool: Path, dmg: Path, private_key: str) -> tuple[str, str]:
     completed = subprocess.run(
-        [str(tool), str(dmg)],
+        [str(tool), "--ed-key-file", "-", str(dmg)],
         input=private_key + "\n",
         text=True,
         stdout=subprocess.PIPE,
@@ -53,7 +53,7 @@ def main() -> int:
         raise RuntimeError(f"DMG not found: {args.dmg}")
 
     signature, length = run_sign_update(args.sign_update_tool, args.dmg, private_key)
-    pub_date = dt.datetime.now(dt.UTC).strftime("%a, %d %b %Y %H:%M:%S %z")
+    pub_date = dt.datetime.now(dt.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S %z")
 
     channel = ""
     if args.channel:
