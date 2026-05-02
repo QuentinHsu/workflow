@@ -396,6 +396,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare-version.outputs.tag }}
           RELEASE_NAME: ${{ inputs.app_display_name }} ${{ needs.prepare-version.outputs.version }}
         run: |
