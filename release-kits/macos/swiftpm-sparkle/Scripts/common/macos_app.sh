@@ -38,7 +38,15 @@ macos_app_swift_args() {
   printf '%s\n' "${args[@]}"
 }
 
+macos_app_configure_deployment_target() {
+  if [[ -n "${APP_MIN_MACOS:-}" && -z "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
+    export MACOSX_DEPLOYMENT_TARGET="$APP_MIN_MACOS"
+  fi
+}
+
 macos_app_swift_bin_path() {
+  macos_app_configure_deployment_target
+
   local args=()
   while IFS= read -r arg; do
     args+=("$arg")
@@ -48,6 +56,8 @@ macos_app_swift_bin_path() {
 }
 
 macos_app_build_binary() {
+  macos_app_configure_deployment_target
+
   local args=()
   while IFS= read -r arg; do
     args+=("$arg")
@@ -70,30 +80,63 @@ macos_app_copy_frameworks() {
 
 macos_app_sign_bundle() {
   local app_bundle="$1"
-  local identity="${CODE_SIGN_IDENTITY:-}"
+  local identity="${CODE_SIGN_IDENTITY:--}"
 
-  if [[ -z "$identity" ]]; then
-    echo "CODE_SIGN_IDENTITY is not set; leaving ${app_bundle} unsigned."
-    return 0
+  local sign_args=(--force --options runtime)
+  if [[ "$identity" != "-" ]]; then
+    sign_args+=(--timestamp)
+  else
+    echo "CODE_SIGN_IDENTITY is not set; ad-hoc signing ${app_bundle}."
   fi
-
-  local entitlements_args=()
+  sign_args+=(--sign "$identity")
   if [[ -n "${CODE_SIGN_ENTITLEMENTS:-}" ]]; then
-    entitlements_args=(--entitlements "$CODE_SIGN_ENTITLEMENTS")
+    sign_args+=(--entitlements "$CODE_SIGN_ENTITLEMENTS")
   fi
 
   find "${app_bundle}/Contents/Frameworks" -type f -perm -111 -print0 2>/dev/null |
     while IFS= read -r -d '' executable; do
-      codesign --force --options runtime --timestamp --sign "$identity" "${entitlements_args[@]}" "$executable"
+      codesign "${sign_args[@]}" "$executable"
     done
 
-  find "${app_bundle}/Contents/Frameworks" -maxdepth 2 -name "*.framework" -type d -print0 2>/dev/null |
-    while IFS= read -r -d '' framework; do
-      codesign --force --options runtime --timestamp --sign "$identity" "${entitlements_args[@]}" "$framework"
+  find "${app_bundle}/Contents/Frameworks" \
+    \( -name "*.app" -o -name "*.framework" -o -name "*.xpc" \) \
+    -type d -print0 2>/dev/null |
+    sort -rz |
+    while IFS= read -r -d '' bundle; do
+      codesign "${sign_args[@]}" "$bundle"
     done
 
-  codesign --force --options runtime --timestamp --sign "$identity" "${entitlements_args[@]}" "$app_bundle"
+  codesign "${sign_args[@]}" "$app_bundle"
   codesign --verify --deep --strict --verbose=2 "$app_bundle"
+}
+
+macos_app_validate_executable() {
+  local executable="$1"
+
+  if [[ ! -x "$executable" ]]; then
+    echo "App executable is not executable: ${executable}" >&2
+    exit 1
+  fi
+
+  local actual_archs=""
+  actual_archs="$(lipo -archs "$executable" 2>/dev/null || true)"
+  if [[ -n "$actual_archs" ]]; then
+    echo "Built executable architectures: ${actual_archs}"
+  fi
+
+  if [[ -n "${TARGET_ARCH:-}" && -n "$actual_archs" ]]; then
+    case " ${actual_archs} " in
+      *" ${TARGET_ARCH} "*) ;;
+      *)
+        echo "Built executable does not contain requested architecture ${TARGET_ARCH}: ${actual_archs}" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  if command -v vtool >/dev/null 2>&1; then
+    vtool -show-build "$executable" 2>/dev/null || true
+  fi
 }
 
 macos_app_create_bundle() {
@@ -125,11 +168,12 @@ macos_app_create_bundle() {
   rm -rf "$app_bundle"
   mkdir -p "${app_bundle}/Contents/MacOS" "${app_bundle}/Contents/Resources"
   cp "$executable" "${app_bundle}/Contents/MacOS/${APP_TARGET_NAME}"
+  chmod 755 "${app_bundle}/Contents/MacOS/${APP_TARGET_NAME}"
   cp "$info_plist" "${app_bundle}/Contents/Info.plist"
 
   local resource_bundle="${bin_path}/${APP_TARGET_NAME}_${APP_TARGET_NAME}.bundle"
   if [[ -d "$resource_bundle" ]]; then
-    ditto "$resource_bundle" "${app_bundle}/$(basename "$resource_bundle")"
+    ditto "$resource_bundle" "${app_bundle}/Contents/Resources/$(basename "$resource_bundle")"
   fi
 
   if [[ -n "${APP_ICON_PATH:-}" && -f "$APP_ICON_PATH" ]]; then
@@ -142,6 +186,7 @@ macos_app_create_bundle() {
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleDisplayName string "$APP_DISPLAY_NAME"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleIdentifier string "$APP_BUNDLE_ID"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleExecutable string "$APP_TARGET_NAME"
+  macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundlePackageType string APPL
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleShortVersionString string "$version"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" CFBundleVersion string "$build_number"
   macos_app_plist_set "${app_bundle}/Contents/Info.plist" LSMinimumSystemVersion string "$min_macos"
@@ -155,6 +200,7 @@ macos_app_create_bundle() {
   fi
 
   macos_app_sign_bundle "$app_bundle"
+  macos_app_validate_executable "${app_bundle}/Contents/MacOS/${APP_TARGET_NAME}"
 
   echo "$app_bundle"
 }
