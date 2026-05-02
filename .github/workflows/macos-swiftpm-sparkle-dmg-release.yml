@@ -27,6 +27,30 @@ on:
         required: false
         type: string
         default: Scripts/generate_release_notes.sh
+      changelog_script:
+        required: false
+        type: string
+        default: Scripts/update_changelog.py
+      changelog_path:
+        required: false
+        type: string
+        default: CHANGELOG.md
+      changelog_enabled:
+        required: false
+        type: boolean
+        default: true
+      changelog_language:
+        required: false
+        type: string
+        default: zh-CN
+      changelog_summary_command:
+        required: false
+        type: string
+        default: ""
+      changelog_summary_setup_command:
+        required: false
+        type: string
+        default: ""
       release_kit_repository:
         required: false
         type: string
@@ -58,6 +82,8 @@ on:
     secrets:
       sparkle_private_ed_key:
         required: false
+      changelog_summary_token:
+        required: false
 
 jobs:
   prepare-version:
@@ -69,12 +95,21 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.version.outputs.build_number }}
+      previous_tag: ${{ steps.version.outputs.previous_tag }}
+      remote_tag_exists: ${{ steps.version.outputs.remote_tag_exists }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           path: app
           fetch-depth: 0
+
+      - name: Checkout release kit
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.release_kit_repository }}
+          ref: ${{ inputs.release_kit_ref }}
+          path: release-kit
 
       - name: Resolve release version
         id: version
@@ -94,14 +129,18 @@ jobs:
             return 1
           }
 
+          previous_tag=""
+
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             tag="${GITHUB_REF_NAME}"
             version="$(extract_version "$tag")"
+            previous_tag="$(git -C app tag -l 'v[0-9]*.[0-9]*.[0-9]*' '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -Fxv "$tag" | head -n 1 || true)"
           elif [[ -n "${INPUT_TAG:-}" ]]; then
             tag="$INPUT_TAG"
             version="$(extract_version "$tag")"
+            previous_tag="$(git -C app tag -l 'v[0-9]*.[0-9]*.[0-9]*' '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -Fxv "$tag" | head -n 1 || true)"
           else
-            previous_tag="$(git -C app tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+            previous_tag="$(git -C app tag -l 'v[0-9]*.[0-9]*.[0-9]*' '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
             base_version="0.0.0"
             range="HEAD"
             if [[ -n "$previous_tag" ]]; then
@@ -142,16 +181,85 @@ jobs:
             exit 1
           fi
 
-          if [[ "${GITHUB_EVENT_NAME}" != "push" ]] && ! git -C app rev-parse "$tag" >/dev/null 2>&1; then
-            git -C app config user.name "github-actions[bot]"
-            git -C app config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C app tag "$tag"
-            git -C app push origin "$tag"
+          remote_tag_exists="false"
+          if git -C app ls-remote --tags origin "refs/tags/${tag}" | grep -q .; then
+            remote_tag_exists="true"
           fi
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+          echo "remote_tag_exists=${remote_tag_exists}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up changelog summary command
+        if: github.event_name != 'push' && inputs.changelog_enabled && inputs.changelog_summary_setup_command != '' && steps.version.outputs.remote_tag_exists != 'true'
+        shell: bash
+        env:
+          CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+        run: |
+          set -euo pipefail
+          ${{ inputs.changelog_summary_setup_command }}
+
+      - name: Update changelog from commits
+        if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
+        shell: bash
+        env:
+          CHANGELOG_SUMMARY_COMMAND: ${{ inputs.changelog_summary_command }}
+          CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+        run: |
+          set -euo pipefail
+
+          cd app
+          python3 "../release-kit/${{ inputs.release_kit_path }}/${{ inputs.changelog_script }}" \
+            --version "${{ steps.version.outputs.version }}" \
+            --from-ref "${{ steps.version.outputs.previous_tag }}" \
+            --to-ref HEAD \
+            --changelog "${{ inputs.changelog_path }}" \
+            --project-name "${{ inputs.app_display_name }}" \
+            --language "${{ inputs.changelog_language }}" \
+            --mode write
+
+      - name: Commit changelog
+        if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd app
+          if git diff --quiet -- "${{ inputs.changelog_path }}"; then
+            echo "${{ inputs.changelog_path }} unchanged."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${{ inputs.changelog_path }}"
+          git commit -m "docs(changelog): release ${{ steps.version.outputs.version }}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Create and push release tag
+        if: github.event_name != 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd app
+          tag="${{ steps.version.outputs.tag }}"
+          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q .; then
+            echo "Tag ${tag} already exists on origin, reusing it."
+            exit 0
+          fi
+
+          if ! git rev-parse "$tag" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+          fi
+
+          git push origin "$tag"
 
   build-dmg:
     needs: prepare-version
@@ -276,6 +384,10 @@ jobs:
 
       - name: Generate release body
         shell: bash
+        env:
+          APP_DISPLAY_NAME: ${{ inputs.app_display_name }}
+          CHANGELOG_PATH: ${{ inputs.changelog_path }}
+          CHANGELOG_LANGUAGE: ${{ inputs.changelog_language }}
         run: |
           cd app
           ../release-kit/${{ inputs.release_kit_path }}/${{ inputs.release_notes_script }} "${{ needs.prepare-version.outputs.tag }}" "${{ needs.prepare-version.outputs.version }}" ../release.md

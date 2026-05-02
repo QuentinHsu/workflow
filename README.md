@@ -40,11 +40,23 @@ jobs:
       release_kit_repository: QuentinHsu/workflow
       release_kit_ref: main
       release_kit_path: release-kits/macos/swiftpm-sparkle
+      changelog_path: CHANGELOG.md
+      changelog_language: zh-CN
       sparkle_public_ed_key: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
       architectures: '["arm64","x86_64"]'
     secrets:
       sparkle_private_ed_key: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
 ```
+
+The stable release workflow generates and commits `CHANGELOG.md` before creating a manual release tag. It groups Conventional Commit entries into features, improvements, and fixes, then uses the matching changelog section as the GitHub Release body. Set `changelog_enabled: false` to keep release notes generated directly from git history.
+
+Optional changelog inputs:
+
+- `changelog_path`: changelog file path in the app repository. Defaults to `CHANGELOG.md`.
+- `changelog_language`: `zh-CN` or `en`. Defaults to `zh-CN`.
+- `changelog_summary_setup_command`: optional shell setup for an external summary command.
+- `changelog_summary_command`: optional command template. Use `{prompt_file}` where the generated prompt path should be inserted.
+- `changelog_summary_token`: optional secret exposed as both `CHANGELOG_SUMMARY_TOKEN` and `COPILOT_GITHUB_TOKEN`.
 
 Required app-side files:
 

@@ -225,6 +225,8 @@ jobs:
 
       - name: Generate release body
         shell: bash
+        env:
+          APP_DISPLAY_NAME: ${{ inputs.app_display_name }}
         run: |
           cd app
           ../release-kit/${{ inputs.release_kit_path }}/${{ inputs.release_notes_script }} "${{ needs.prepare-beta.outputs.tag }}" "${{ needs.prepare-beta.outputs.version }}" ../release.md
