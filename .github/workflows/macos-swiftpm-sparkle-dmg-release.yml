@@ -214,6 +214,12 @@ jobs:
           echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
           echo "remote_tag_exists=${remote_tag_exists}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Node.js for optional Copilot summary
+        if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       - name: Set up changelog summary command
         if: github.event_name != 'push' && inputs.changelog_enabled && steps.version.outputs.remote_tag_exists != 'true'
         shell: bash
@@ -221,6 +227,8 @@ jobs:
           CHANGELOG_SUMMARY_SETUP_COMMAND: ${{ inputs.changelog_summary_setup_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          GH_TOKEN: ${{ secrets.changelog_summary_token }}
+          GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
           NPM_CONFIG_IGNORE_SCRIPTS: "false"
         run: |
           set -euo pipefail
@@ -240,6 +248,8 @@ jobs:
           CHANGELOG_SUMMARY_COMMAND_INPUT: ${{ inputs.changelog_summary_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          GH_TOKEN: ${{ secrets.changelog_summary_token }}
+          GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
           NPM_CONFIG_IGNORE_SCRIPTS: "false"
         run: |
           set -euo pipefail
@@ -248,7 +258,7 @@ jobs:
 
           changelog_summary_command="${CHANGELOG_SUMMARY_COMMAND_INPUT:-}"
           if [[ -z "$changelog_summary_command" && -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
-            changelog_summary_command='copilot -s --no-ask-user -p "$(cat {prompt_file})"'
+            changelog_summary_command='copilot -s --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"'
           fi
 
           export CHANGELOG_SUMMARY_COMMAND="$changelog_summary_command"

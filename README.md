@@ -62,8 +62,8 @@ Optional changelog inputs:
 - `changelog_path`: changelog file path in the app repository. Defaults to `CHANGELOG.md`.
 - `changelog_language`: `zh-CN` or `en`. Defaults to `zh-CN`.
 - `changelog_summary_setup_command`: optional shell setup for the summary command. If omitted and a Copilot token is provided, the workflow runs `npm install -g @github/copilot`.
-- `changelog_summary_command`: optional command template for generating only the top summary sentence from the raw commit messages. Use `{prompt_file}` where the generated prompt path should be inserted. If omitted and a Copilot token is provided, the workflow uses `copilot -s --no-ask-user -p "$(cat {prompt_file})"`.
-- `changelog_summary_token`: optional secret exposed as both `CHANGELOG_SUMMARY_TOKEN` and `COPILOT_GITHUB_TOKEN`.
+- `changelog_summary_command`: optional command template for generating only the top summary sentence from the raw commit messages. Use `{prompt_file}` where the generated prompt path should be inserted. If omitted and a Copilot token is provided, the workflow uses `copilot -s --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"`.
+- `changelog_summary_token`: optional secret exposed as `CHANGELOG_SUMMARY_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN`.
 
 Optional toolchain inputs:
 
@@ -80,7 +80,7 @@ with:
   xcode_version: "26.4.1"
 ```
 
-For GitHub Copilot CLI changelog summaries, create a fine-grained personal access token from [GitHub personal access tokens](https://github.com/settings/personal-access-tokens/new), add the `Copilot Requests` account permission, then save it in the caller repository as the `COPILOT_GITHUB_TOKEN` Actions secret. Pass it through with:
+For GitHub Copilot CLI changelog summaries, create a fine-grained personal access token from [GitHub personal access tokens](https://github.com/settings/personal-access-tokens/new), add the `Copilot Requests` account permission, and make sure the token owner has access to GitHub Copilot. Classic personal access tokens and the built-in `GITHUB_TOKEN` do not provide Copilot Requests access. Save the token in the caller repository as the `COPILOT_GITHUB_TOKEN` Actions secret, then pass it through with:
 
 ```yaml
 secrets:
