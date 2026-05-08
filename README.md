@@ -57,12 +57,14 @@ jobs:
 
 The stable release workflow generates and commits `CHANGELOG.md` before creating a manual release tag. It groups Conventional Commit entries into features, improvements, and fixes, then uses the matching changelog body as the GitHub Release body. When a Copilot token is provided, it installs GitHub Copilot CLI and asks Copilot to analyze the raw release commit messages for the top summary sentence only. If Copilot is unavailable or the command fails, it falls back to the local summary. Set `changelog_enabled: false` to keep release notes generated directly from git history.
 
+When the changelog path does not exist yet, the workflow creates the file on the first manual release and commits it back to the caller repository.
+
 Optional changelog inputs:
 
 - `changelog_path`: changelog file path in the app repository. Defaults to `CHANGELOG.md`.
 - `changelog_language`: `zh-CN` or `en`. Defaults to `zh-CN`.
 - `changelog_summary_setup_command`: optional shell setup for the summary command. If omitted and a Copilot token is provided, the workflow runs `npm install -g @github/copilot`.
-- `changelog_summary_command`: optional command template for generating only the top summary sentence from the raw commit messages. Use `{prompt_file}` where the generated prompt path should be inserted. If omitted and a Copilot token is provided, the workflow uses `copilot -s --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"`.
+- `changelog_summary_command`: optional command template for generating only the top summary sentence from the raw commit messages. Use `{prompt_file}` where the generated prompt path should be inserted. If omitted and a Copilot token is provided, the workflow uses `copilot -s --allow-all-tools --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"`.
 - `changelog_summary_token`: optional secret exposed as `CHANGELOG_SUMMARY_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN`.
 
 Optional toolchain inputs:
@@ -87,7 +89,7 @@ secrets:
   changelog_summary_token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 ```
 
-The default Copilot command uses silent, non-interactive mode so the release workflow can capture a clean summary without prompts.
+The default Copilot command uses silent, non-interactive mode so the release workflow can capture a clean summary without prompts. Current Copilot CLI releases require `--allow-all-tools` (or `COPILOT_ALLOW_ALL=true`) in non-interactive mode, so the reusable workflow sets that automatically for the built-in summary flow.
 
 Required app-side files:
 

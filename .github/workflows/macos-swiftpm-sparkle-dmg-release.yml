@@ -227,6 +227,7 @@ jobs:
           CHANGELOG_SUMMARY_SETUP_COMMAND: ${{ inputs.changelog_summary_setup_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          COPILOT_ALLOW_ALL: "true"
           GH_TOKEN: ${{ secrets.changelog_summary_token }}
           GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
           NPM_CONFIG_IGNORE_SCRIPTS: "false"
@@ -248,6 +249,7 @@ jobs:
           CHANGELOG_SUMMARY_COMMAND_INPUT: ${{ inputs.changelog_summary_command }}
           CHANGELOG_SUMMARY_TOKEN: ${{ secrets.changelog_summary_token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
+          COPILOT_ALLOW_ALL: "true"
           GH_TOKEN: ${{ secrets.changelog_summary_token }}
           GITHUB_TOKEN: ${{ secrets.changelog_summary_token }}
           NPM_CONFIG_IGNORE_SCRIPTS: "false"
@@ -258,7 +260,7 @@ jobs:
 
           changelog_summary_command="${CHANGELOG_SUMMARY_COMMAND_INPUT:-}"
           if [[ -z "$changelog_summary_command" && -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
-            changelog_summary_command='copilot -s --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"'
+            changelog_summary_command='copilot -s --allow-all-tools --no-ask-user --no-custom-instructions --disable-builtin-mcps -p "$(cat {prompt_file})"'
           fi
 
           export CHANGELOG_SUMMARY_COMMAND="$changelog_summary_command"
@@ -279,14 +281,15 @@ jobs:
           set -euo pipefail
 
           cd app
-          if git diff --quiet -- "${{ inputs.changelog_path }}"; then
+          git add "${{ inputs.changelog_path }}"
+
+          if git diff --cached --quiet -- "${{ inputs.changelog_path }}"; then
             echo "${{ inputs.changelog_path }} unchanged."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ inputs.changelog_path }}"
           git commit -m "docs(changelog): release ${{ steps.version.outputs.version }}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
